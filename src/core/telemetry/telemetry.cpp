@@ -38,6 +38,13 @@ constexpr std::chrono::milliseconds DEFAULT_TELEMETRY_RUN_INTERVAL = 100ms;
 constexpr size_t DEFAULT_TELEMETRY_BUFFER_SIZE = 4096;
 constexpr const char *defaultTelemetryPlugin = "BUFFER";
 
+std::unique_ptr<nixlTelemetry>
+nixlTelemetry::create(const std::string &agent_name) {
+    std::unique_ptr<nixlTelemetry> t(new nixlTelemetry(agent_name));
+    if (!t->exporter_) return nullptr;
+    return t;
+}
+
 nixlTelemetry::nixlTelemetry(const std::string &agent_name)
     : pool_(1),
       writeTask_(pool_.get_executor(), DEFAULT_TELEMETRY_RUN_INTERVAL, false),

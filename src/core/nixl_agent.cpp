@@ -156,17 +156,19 @@ nixlAgentData::nixlAgentData(const std::string &name, const nixlAgentConfig &con
 
     if (telemetry_enabled) {
         if (*telemetry_enabled) {
-            telemetryEnabled = true;
-            telemetry_ = std::make_unique<nixlTelemetry>(name);
+            telemetry_ = nixlTelemetry::create(name);
+            if (!telemetry_) {
+                NIXL_WARN << "Telemetry was requested but no exporter is configured "
+                             "(set NIXL_TELEMETRY_EXPORTER or NIXL_TELEMETRY_DIR); "
+                             "per-transfer telemetry and error export are disabled.";
+            }
         } else if (config.captureTelemetry) {
-            telemetryEnabled = true;
             NIXL_WARN << "NIXL telemetry is enabled through config, "
                          "ignoring the NIXL_TELEMETRY_ENABLE environment variable";
         } else {
             NIXL_DEBUG << "NIXL telemetry is disabled";
         }
     } else if (config.captureTelemetry) {
-        telemetryEnabled = true;
         NIXL_DEBUG << "Capturing NIXL telemetry based on config (without an output file)";
     }
 }
@@ -328,7 +330,7 @@ nixlAgent::createBackend(const nixl_backend_t &type,
     init_params.enableProgTh = data->config_.useProgThread;
     init_params.pthrDelay = data->config_.pthrDelay;
     init_params.syncMode = data->config_.syncMode;
-    init_params.enableTelemetry_ = (data->telemetry_ != nullptr);
+    init_params.enableTelemetry_ = data->telemetry_ != nullptr;
 
     // First, try to load the backend as a plugin
     auto& plugin_manager = nixlPluginManager::getInstance();
@@ -817,7 +819,7 @@ nixlAgent::makeXferReq (const nixl_xfer_op_t &operation,
     handle->notifMsg = opt_args.notifMsg;
     handle->hasNotif = opt_args.hasNotif;
 
-    if (data->telemetryEnabled) {
+    if (data->telemetry_) {
         handle->telemetry.totalBytes = total_bytes;
         handle->telemetry.descCount = handle->initiatorDescs->descCount();
     }
@@ -952,7 +954,7 @@ nixlAgent::createXferReq(const nixl_xfer_op_t &operation,
     handle->notifMsg = opt_args.notifMsg;
     handle->hasNotif = opt_args.hasNotif;
 
-    if (data->telemetryEnabled) {
+    if (data->telemetry_) {
         handle->telemetry.totalBytes = total_bytes;
         handle->telemetry.descCount = handle->initiatorDescs->descCount();
     }
@@ -1029,7 +1031,7 @@ nixlAgent::postXferReq(nixlXferReqH *req_hndl,
         return NIXL_ERR_INVALID_PARAM;
     }
 
-    if (data->telemetryEnabled) {
+    if (data->telemetry_) {
         req_hndl->telemetry.startTime = std::chrono::steady_clock::now();
     }
 
@@ -1111,7 +1113,7 @@ nixlAgent::postXferReq(nixlXferReqH *req_hndl,
         }
     }
 
-    if (data->telemetryEnabled) {
+    if (data->telemetry_) {
         NIXL_DEBUG << req_hndl->initiatorDescs->to_string(true);
 
         if (req_hndl->status < 0) {
@@ -1150,7 +1152,7 @@ nixlAgent::getXferStatus (nixlXferReqH *req_hndl) const {
                                 << "' returned error status " << req_hndl->status;
             }
         }
-        if (data->telemetryEnabled) {
+        if (data->telemetry_) {
             if (req_hndl->status == NIXL_SUCCESS) {
                 req_hndl->updateRequestStats(data->telemetry_.get(), NIXL_TELEMETRY_FINISH);
             } else if (req_hndl->status < 0) {
@@ -1166,7 +1168,7 @@ nixlAgent::getXferStatus (nixlXferReqH *req_hndl) const {
 nixl_status_t
 nixlAgent::getXferTelemetry(const nixlXferReqH *req_hndl, nixl_xfer_telem_t &telemetry) const {
 
-    if (!data->telemetryEnabled) {
+    if (!data->telemetry_) {
         NIXL_ERROR_FUNC << "cannot return values when telemetry is not enabled.";
         return NIXL_ERR_NO_TELEMETRY;
     }

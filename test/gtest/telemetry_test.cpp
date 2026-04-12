@@ -97,13 +97,14 @@ protected:
 
 TEST_F(telemetryTest, BasicInitialization) {
     EXPECT_NO_THROW({
-        nixlTelemetry telemetry(testFile_);
+        auto telemetry = nixlTelemetry::create(testFile_);
+        ASSERT_NE(telemetry, nullptr);
         validateState();
     });
 }
 
 TEST_F(telemetryTest, InitializationWithEmptyFileName) {
-    EXPECT_THROW({ nixlTelemetry telemetry(""); }, std::invalid_argument);
+    EXPECT_THROW({ nixlTelemetry::create(""); }, std::invalid_argument);
 }
 
 TEST_F(telemetryTest, CustomBufferSize) {
@@ -112,7 +113,8 @@ TEST_F(telemetryTest, CustomBufferSize) {
     envHelper_.addVar(TELEMETRY_BUFFER_SIZE_VAR, "32");
 
     EXPECT_NO_THROW({
-        nixlTelemetry telemetry(testFile_);
+        auto telemetry = nixlTelemetry::create(testFile_);
+        ASSERT_NE(telemetry, nullptr);
         validateState();
     });
     capacity_ = tmp_capacity;
@@ -122,23 +124,24 @@ TEST_F(telemetryTest, CustomBufferSize) {
 TEST_F(telemetryTest, InvalidBufferSize) {
     envHelper_.addVar(TELEMETRY_BUFFER_SIZE_VAR, "0");
 
-    EXPECT_THROW({ nixlTelemetry telemetry(testFile_); }, std::invalid_argument);
+    EXPECT_THROW({ nixlTelemetry::create(testFile_); }, std::invalid_argument);
     envHelper_.popVar();
 }
 
 // Test transfer bytes tracking
 TEST_F(telemetryTest, TransferBytesTracking) {
     envHelper_.addVar(TELEMETRY_RUN_INTERVAL_VAR, "1");
-    nixlTelemetry telemetry(testFile_);
+    auto telemetry = nixlTelemetry::create(testFile_);
+    ASSERT_NE(telemetry, nullptr);
 
-    EXPECT_NO_THROW(telemetry.updateTxBytes(1024));
-    EXPECT_NO_THROW(telemetry.updateRxBytes(1024));
-    EXPECT_NO_THROW(telemetry.updateTxRequestsNum(1));
-    EXPECT_NO_THROW(telemetry.updateRxRequestsNum(1));
-    EXPECT_NO_THROW(telemetry.updateErrorCount(nixl_status_t::NIXL_ERR_BACKEND));
-    EXPECT_NO_THROW(telemetry.updateMemoryRegistered(1024));
-    EXPECT_NO_THROW(telemetry.updateMemoryDeregistered(1024));
-    EXPECT_NO_THROW(telemetry.addXferTime(std::chrono::microseconds(100), true, 2000));
+    EXPECT_NO_THROW(telemetry->updateTxBytes(1024));
+    EXPECT_NO_THROW(telemetry->updateRxBytes(1024));
+    EXPECT_NO_THROW(telemetry->updateTxRequestsNum(1));
+    EXPECT_NO_THROW(telemetry->updateRxRequestsNum(1));
+    EXPECT_NO_THROW(telemetry->updateErrorCount(nixl_status_t::NIXL_ERR_BACKEND));
+    EXPECT_NO_THROW(telemetry->updateMemoryRegistered(1024));
+    EXPECT_NO_THROW(telemetry->updateMemoryDeregistered(1024));
+    EXPECT_NO_THROW(telemetry->addXferTime(std::chrono::microseconds(100), true, 2000));
 
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     auto path = testDir_.string() + "/" + testFile_;
@@ -195,24 +198,25 @@ TEST_F(telemetryTest, TelemetryEventStructure) {
 TEST_F(telemetryTest, ShortRunInterval) {
     envHelper_.addVar(TELEMETRY_RUN_INTERVAL_VAR, "1");
 
-    EXPECT_NO_THROW({ nixlTelemetry telemetry(testFile_); });
+    EXPECT_NO_THROW({ auto telemetry = nixlTelemetry::create(testFile_); });
     envHelper_.popVar();
 }
 
 TEST_F(telemetryTest, LargeRunInterval) {
     envHelper_.addVar(TELEMETRY_RUN_INTERVAL_VAR, "10000");
 
-    EXPECT_NO_THROW({ nixlTelemetry telemetry(testFile_); });
+    EXPECT_NO_THROW({ auto telemetry = nixlTelemetry::create(testFile_); });
     envHelper_.popVar();
 }
 
 TEST_F(telemetryTest, BufferOverflowHandling) {
     envHelper_.addVar(TELEMETRY_BUFFER_SIZE_VAR, "4");
 
-    nixlTelemetry telemetry(testFile_);
+    auto telemetry = nixlTelemetry::create(testFile_);
+    ASSERT_NE(telemetry, nullptr);
 
     for (int i = 0; i < 10; ++i) {
-        EXPECT_NO_THROW(telemetry.updateTxBytes(i * 100));
+        EXPECT_NO_THROW(telemetry->updateTxBytes(i * 100));
     }
 
     envHelper_.popVar();
@@ -225,7 +229,8 @@ TEST_F(telemetryTest, CustomTelemetryDirectory) {
 
     EXPECT_NO_THROW({
         std::string telemetry_file = "test_telemetry";
-        nixlTelemetry telemetry(telemetry_file);
+        auto telemetry = nixlTelemetry::create(telemetry_file);
+        ASSERT_NE(telemetry, nullptr);
 
         std::string file_path = custom_dir.string() + "/" + telemetry_file;
 
@@ -252,29 +257,29 @@ TEST_F(telemetryTest, TelemetryCategoryStringConversion) {
 TEST_F(telemetryTest, ConcurrentAccess) {
     envHelper_.addVar(TELEMETRY_RUN_INTERVAL_VAR, "1");
     testFile_ = "test_concurrent_access";
-    nixlTelemetry telemetry(testFile_);
+    auto telemetry = nixlTelemetry::create(testFile_);
+    ASSERT_NE(telemetry, nullptr);
 
     const int num_threads = 4;
     const int operations_per_thread = 100;
 
     std::vector<std::thread> threads;
 
-    // Create threads that perform different telemetry operations
     for (int i = 0; i < num_threads; ++i) {
         threads.emplace_back([&telemetry, i]() {
             for (int j = 0; j < operations_per_thread; ++j) {
                 switch (i % 4) {
                 case 0:
-                    telemetry.updateTxBytes(j * 100);
+                    telemetry->updateTxBytes(j * 100);
                     break;
                 case 1:
-                    telemetry.updateRxBytes(j * 50);
+                    telemetry->updateRxBytes(j * 50);
                     break;
                 case 2:
-                    telemetry.updateTxRequestsNum(j);
+                    telemetry->updateTxRequestsNum(j);
                     break;
                 case 3:
-                    telemetry.updateRxRequestsNum(j);
+                    telemetry->updateRxRequestsNum(j);
                     break;
                 }
             }
@@ -296,11 +301,11 @@ TEST_F(telemetryTest, ConcurrentAccess) {
 TEST_F(telemetryTest, TelemetryAgentEventsOne) {
     envHelper_.addVar(TELEMETRY_RUN_INTERVAL_VAR, "1");
 
-    nixlTelemetry telemetry(testFile_);
+    auto telemetry = nixlTelemetry::create(testFile_);
+    ASSERT_NE(telemetry, nullptr);
 
-    // Add some agent events
-    telemetry.updateTxBytes(1024);
-    telemetry.updateRxBytes(2048);
+    telemetry->updateTxBytes(1024);
+    telemetry->updateRxBytes(2048);
 
     // Wait for the telemetry to be written
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -327,11 +332,11 @@ TEST_F(telemetryTest, TelemetryAgentEventsOne) {
 TEST_F(telemetryTest, TelemetryAgentEventsTwo) {
     envHelper_.addVar(TELEMETRY_RUN_INTERVAL_VAR, "1");
 
-    nixlTelemetry telemetry(testFile_);
+    auto telemetry = nixlTelemetry::create(testFile_);
+    ASSERT_NE(telemetry, nullptr);
 
-    // Add agent events
-    telemetry.updateTxBytes(1024);
-    telemetry.updateErrorCount(nixl_status_t::NIXL_ERR_BACKEND);
+    telemetry->updateTxBytes(1024);
+    telemetry->updateErrorCount(nixl_status_t::NIXL_ERR_BACKEND);
 
     // Wait for the telemetry to be written
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
