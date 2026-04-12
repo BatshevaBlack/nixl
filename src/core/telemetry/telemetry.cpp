@@ -98,6 +98,8 @@ nixlTelemetry::initializeTelemetry() {
         throw std::invalid_argument("Telemetry buffer size cannot be 0");
     }
 
+    events_.reserve(maxBufferedEvents_);
+
     const std::optional<std::string> exporter_name = getExporterName();
 
     if (!exporter_name) {
