@@ -133,6 +133,7 @@ struct nixlTelemetryEvent {
     nixl_telemetry_category_t category_; // Main event category for filtering
     nixl_telemetry_event_type_t eventType_; // Detailed event type/identifier
     uint64_t value_; // Numeric value associated with the event
+    uint8_t ready_{0};
 
     nixlTelemetryEvent() noexcept = default;
 
@@ -141,7 +142,8 @@ struct nixlTelemetryEvent {
                        uint64_t value) noexcept
         : category_(category),
           eventType_(event_type),
-          value_(value) {}
+          value_(value),
+          ready_(0) {}
 };
 
 #endif

@@ -94,6 +94,8 @@ nixlTelemetry::~nixlTelemetry() {
     if (buffer_) {
         writeEventHelper();
         buffer_.reset();
+    } else if (eventBuffers_[0]) {
+        writeEventHelper();
     }
 }
 
@@ -152,10 +154,13 @@ nixlTelemetry::initializeTelemetry() {
 
     NIXL_DEBUG << "NIXL telemetry is enabled with exporter: " << *exporter_name;
 
+    eventBuffers_[0] = std::make_unique<nixlTelemetryEvent[]>(maxBufferedEvents_);
+    eventBuffers_[1] = std::make_unique<nixlTelemetryEvent[]>(maxBufferedEvents_);
+    writeState_.store(0);
+
     const auto run_interval =
         nixl::config::getValueDefaulted(TELEMETRY_RUN_INTERVAL_VAR, DEFAULT_TELEMETRY_RUN_INTERVAL);
 
-    // Update write task interval and start it
     writeTask_.callback_ = [this]() { return writeEventHelper(); };
     writeTask_.interval_ = run_interval;
     writeTask_.enabled_ = true;
@@ -164,18 +169,22 @@ nixlTelemetry::initializeTelemetry() {
 
 bool
 nixlTelemetry::writeEventHelper() {
-    std::vector<nixlTelemetryEvent> next_queue;
-    next_queue.reserve(maxBufferedEvents_);
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        events_.swap(next_queue);
+    const size_t old = writeState_.exchange(nextBufferBit_);
+    const unsigned buffer = (old & WriteState::BUFFER_BIT) ? 1 : 0;
+    const size_t count = std::min(old & WriteState::INDEX_MASK, maxBufferedEvents_);
+
+    if ((old & WriteState::INDEX_MASK) > maxBufferedEvents_) {
+        NIXL_WARN << "Telemetry events were dropped due to buffer overflow";
     }
 
-    for (auto &event : next_queue) {
-        // if full, ignore
-        exporter_->exportEvent(event);
+    for (size_t i = 0; i < count; ++i) {
+        auto &slot = eventBuffers_[buffer][i];
+        if (!slot.ready_) continue;
+        exporter_->exportEvent(slot);
+        slot.ready_ = 0;
     }
 
+    nextBufferBit_ ^= WriteState::BUFFER_BIT;
     return true;
 }
 
@@ -200,15 +209,16 @@ void
 nixlTelemetry::updateData(nixl_telemetry_event_type_t event_type,
                           nixl_telemetry_category_t category,
                           uint64_t value) {
-    // agent can be multi-threaded
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (events_.size() >= maxBufferedEvents_) {
-        return;
-    }
-    events_.emplace_back(category, event_type, value);
+    const WriteState state{writeState_.fetch_add(1)};
+    if (state.index() >= maxBufferedEvents_) return;
+
+    auto &slot = eventBuffers_[state.buffer()][state.index()];
+    slot.category_  = category;
+    slot.eventType_ = event_type;
+    slot.value_     = value;
+    slot.ready_ = 1;
 }
 
-// The next 4 methods might be removed, as addXferTime covers them.
 void
 nixlTelemetry::updateTxBytes(uint64_t tx_bytes) {
     updateData(nixl_telemetry_event_type_t::AGENT_TX_BYTES,
@@ -266,15 +276,25 @@ nixlTelemetry::addXferTime(std::chrono::microseconds xfer_time, bool is_write, u
     const auto requests_type = is_write ? nixl_telemetry_event_type_t::AGENT_TX_REQUESTS_NUM :
                                           nixl_telemetry_event_type_t::AGENT_RX_REQUESTS_NUM;
 
-    const std::lock_guard lock(mutex_);
-    if (events_.size() + 3 > maxBufferedEvents_) {
-        return;
-    }
-    events_.emplace_back(nixl_telemetry_category_t::NIXL_TELEMETRY_PERFORMANCE,
-                         nixl_telemetry_event_type_t::AGENT_XFER_TIME,
-                         static_cast<uint64_t>(xfer_time.count()));
-    events_.emplace_back(nixl_telemetry_category_t::NIXL_TELEMETRY_TRANSFER, bytes_type, bytes);
-    events_.emplace_back(nixl_telemetry_category_t::NIXL_TELEMETRY_TRANSFER, requests_type, 1);
+    const WriteState state{writeState_.fetch_add(3)};
+    if (state.index() + 3 > maxBufferedEvents_) return;
+
+    auto *slots = &eventBuffers_[state.buffer()][state.index()];
+    auto fill = [](nixlTelemetryEvent &s, nixl_telemetry_category_t cat,
+                   nixl_telemetry_event_type_t type, uint64_t val) {
+        s.category_  = cat;
+        s.eventType_ = type;
+        s.value_     = val;
+        s.ready_     = 1;
+    };
+
+    fill(slots[0], nixl_telemetry_category_t::NIXL_TELEMETRY_PERFORMANCE,
+         nixl_telemetry_event_type_t::AGENT_XFER_TIME,
+         static_cast<uint64_t>(xfer_time.count()));
+    fill(slots[1], nixl_telemetry_category_t::NIXL_TELEMETRY_TRANSFER,
+         bytes_type, bytes);
+    fill(slots[2], nixl_telemetry_category_t::NIXL_TELEMETRY_TRANSFER,
+         requests_type, 1);
 }
 
 void

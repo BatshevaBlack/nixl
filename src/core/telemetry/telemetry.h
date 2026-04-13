@@ -24,8 +24,6 @@
 #include "nixl_types.h"
 
 #include <string>
-#include <vector>
-#include <mutex>
 #include <memory>
 #include <chrono>
 #include <functional>
@@ -84,11 +82,25 @@ private:
                uint64_t value);
     bool
     writeEventHelper();
+
     std::unique_ptr<nixlTelemetryExporter> exporter_;
     std::unique_ptr<sharedRingBuffer<nixlTelemetryEvent>> buffer_;
-    std::vector<nixlTelemetryEvent> events_;
-    size_t maxBufferedEvents_;
-    std::mutex mutex_;
+
+    struct WriteState {
+        static constexpr size_t BUFFER_BIT = size_t(1) << 63;
+        static constexpr size_t INDEX_MASK = BUFFER_BIT - 1;
+
+        size_t raw;
+
+        unsigned buffer() const { return (raw & BUFFER_BIT) ? 1 : 0; }
+        size_t   index()  const { return raw & INDEX_MASK; }
+    };
+
+    std::unique_ptr<nixlTelemetryEvent[]> eventBuffers_[2];
+    size_t maxBufferedEvents_{0};
+    std::atomic<size_t> writeState_{0};
+    size_t nextBufferBit_{WriteState::BUFFER_BIT};
+
     asio::thread_pool pool_;
     periodicTask writeTask_;
     std::string agentName_;
